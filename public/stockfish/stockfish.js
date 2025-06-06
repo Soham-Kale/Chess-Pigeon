@@ -1,30 +1,34 @@
-// useStockfish.js
-import { useEffect, useRef } from "react";
+import { Chess } from "chess.js";
 
-const useStockfish = (onBestMove) => {
-  const stockfishRef = useRef(null);
+// Stockfish Web Worker
+let currentFen = '';
 
-  useEffect(() => {
-    stockfishRef.current = new Worker("/stockfish/stockfish.js");
-    return () => {
-      stockfishRef.current.terminate();
-    };
-  }, []);
-
-  const getBestMove = (fen) => {
-    stockfishRef.current.postMessage("uci");
-    stockfishRef.current.postMessage("position fen " + fen);
-    stockfishRef.current.postMessage("go depth 10");
-
-    stockfishRef.current.onmessage = (event) => {
-      if (event.data.startsWith("bestmove")) {
-        const move = event.data.split(" ")[1];
-        onBestMove(move);
-      }
-    };
-  };
-
-  return { getBestMove };
+self.onmessage = function(e) {
+  if (e.data === "uci") {
+    self.postMessage("uciok");
+  } else if (e.data.startsWith("position fen")) {
+    // Store the current FEN position
+    currentFen = e.data.split("position fen ")[1];
+    self.postMessage("readyok");
+  } else if (e.data.startsWith("go")) {
+    // Generate a valid move based on the current position
+    setTimeout(() => {
+      const move = generateValidMove(currentFen);
+      self.postMessage("bestmove " + move);
+    }, 500);
+  }
 };
 
-export default useStockfish;
+function generateValidMove(fen) {
+  // Create a new chess instance with the current position
+  const chess = new Chess(fen);
+  const moves = chess.moves({ verbose: true });
+  
+  if (moves.length === 0) {
+    return 'e2e4'; // Default move if no legal moves are found
+  }
+  
+  // Get a random legal move
+  const randomMove = moves[Math.floor(Math.random() * moves.length)];
+  return randomMove.from + randomMove.to;
+}
