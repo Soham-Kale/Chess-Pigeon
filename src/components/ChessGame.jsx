@@ -9,18 +9,44 @@ const ChessGame = () => {
   const [lastMoveSquares, setLastMoveSquares] = useState({});
   const [isUserTurn, setIsUserTurn] = useState(true);
   const [pgn, setPgn] = useState("");
+  const [gameTime, setGameTime] = useState(10); // 10 minutes
 
   const [gameOver, setGameOver] = useState(false);
-  const [moveHistory, setMoveHistory] = useState([]); // stores FEN after each move
-  const [currentMoveIndex, setCurrentMoveIndex] = useState(-1); // -1 means start position
+  const [moveHistory, setMoveHistory] = useState([]);
+  const [currentMoveIndex, setCurrentMoveIndex] = useState(-1);
   const [possibleMoves, setPossibleMoves] = useState([]);
+  const [botLevel, setBotLevel] = useState(10); // Default to intermediate level
+  const [status, setStatus] = useState("Your turn");
+  const [isBotThinking, setIsBotThinking] = useState(false);
 
   const stockfishRef = useRef(null);
   const moveSound = useRef(null);
 
   const [moveList, setMoveList] = useState([]);
+  const [analysis, setAnalysis] = useState([]);
+  const [playerName] = useState("Soham");
+  const [botName] = useState("Stockfish Bot");
+  const [timeWhite, setTimeWhite] = useState(600); // 10 minutes in seconds
+  const [timeBlack, setTimeBlack] = useState(600);
 
-  console.log("moves printing: ", moveList);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (game.turn() === 'w') {
+        setTimeWhite(prev => prev > 0 ? prev - 1 : 0);
+      } else {
+        setTimeBlack(prev => prev > 0 ? prev - 1 : 0);
+      }
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [game.turn()]);
+
+  // Format time for display
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+  };
 
   useEffect(() => {
     const pgn = game.pgn();
@@ -28,7 +54,6 @@ const ChessGame = () => {
       .split("\n")
       .filter((line) => !line.startsWith("["))
       .join(" ");
-
 
     const tokens = moveSection.trim().split(/\s+/);
     const groupedMoves = [];
@@ -45,10 +70,10 @@ const ChessGame = () => {
     }
 
     setMoveList(groupedMoves);
-  }, [fen]); // updates on every move
+  }, [fen]);
 
   useEffect(() => {
-    // Initialize Stockfish worker with chess.js
+    // Initialize Stockfish worker
     const workerBlob = new Blob([
       `importScripts('https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js');
       ${stockfishWorkerCode}`
@@ -56,9 +81,43 @@ const ChessGame = () => {
 
     stockfishRef.current = new Worker(URL.createObjectURL(workerBlob));
 
+    // Set up message handler for analysis
+    stockfishRef.current.addEventListener("message", (e) => {
+      if (e.data.includes("info depth") && e.data.includes("score")) {
+        const depthMatch = e.data.match(/depth (\d+)/);
+        const scoreMatch = e.data.match(/score (cp|mate) ([-+]?\d+)/);
+        const pvMatch = e.data.match(/pv (\S+)/);
+
+        if (depthMatch && scoreMatch) {
+          const depth = parseInt(depthMatch[1]);
+          const scoreType = scoreMatch[1];
+          let scoreValue = parseInt(scoreMatch[2]);
+
+          if (scoreType === 'mate') {
+            scoreValue = scoreValue > 0 ? `+#${Math.abs(scoreValue)}` : `-#${Math.abs(scoreValue)}`;
+          } else {
+            scoreValue = (scoreValue / 100).toFixed(1);
+          }
+
+          setAnalysis(prev => {
+            const newAnalysis = [...prev];
+            const moveIndex = newAnalysis.length - 1;
+            if (moveIndex >= 0) {
+              newAnalysis[moveIndex] = {
+                ...newAnalysis[moveIndex],
+                depth,
+                score: scoreValue,
+                variation: pvMatch ? pvMatch[1] : ''
+              };
+            }
+            return newAnalysis;
+          });
+        }
+      }
+    });
+
     moveSound.current = new Audio("/move.mp3");
 
-    // Cleanup on component unmount
     return () => {
       if (stockfishRef.current) {
         stockfishRef.current.terminate();
@@ -89,6 +148,7 @@ const ChessGame = () => {
 
     // Send commands to Stockfish
     stockfishRef.current.postMessage("uci");
+    stockfishRef.current.postMessage(`setoption name Skill Level value ${botLevel}`);
     stockfishRef.current.postMessage(`position fen ${fen}`);
     stockfishRef.current.postMessage("go depth 12");
   };
@@ -125,7 +185,6 @@ const ChessGame = () => {
     return styles;
   };
 
-
   const applyMove = (move) => {
     if (game.isCheckmate()) {
       setGameOver(true);
@@ -148,13 +207,10 @@ const ChessGame = () => {
         [move.to]: { background: "rgba(255, 255, 0, 0.4)" },
       });
 
-      console.log("Move applied successfully:", move);
-      console.log("New FEN:", newFen);
-
       setPgn(game.pgn());
       playMoveSound();
 
-      return true;
+      return result;
     } catch (error) {
       console.error("Error applying move:", error);
       return false;
@@ -166,28 +222,61 @@ const ChessGame = () => {
     if (!isUserTurn) return false;
 
     const move = { from: source, to: target };
-    const userMoved = applyMove(move);
-    if (!userMoved) return false;
+    const moveResult = applyMove(move);
+    if (!moveResult) return false;
+
+    // Record analysis for user move
+    setAnalysis(prev => [
+      ...prev,
+      {
+        moveNumber: Math.floor(moveList.length / 2) + 1,
+        move: moveResult.san,
+        player: orientation === "white" ? "white" : "black",
+        time: formatTime(orientation === "white" ? timeWhite : timeBlack),
+        depth: "...",
+        score: "...",
+        variation: ""
+      }
+    ]);
 
     setIsUserTurn(false);
+    setStatus("Bot thinking...");
+    setIsBotThinking(true);
 
     const newHistory = moveHistory.slice(0, currentMoveIndex + 1);
     newHistory.push(game.fen());
     setMoveHistory(newHistory);
     setCurrentMoveIndex(newHistory.length - 1);
 
-    console.log("User moved, requesting bot move...");
+    // Request analysis for the current position
+    stockfishRef.current.postMessage(`position fen ${game.fen()}`);
+    stockfishRef.current.postMessage("go depth 10");
 
     setTimeout(() => {
       getBestMoveFromStockfish(game.fen(), (botMove) => {
-        console.log("Received bot move:", botMove);
-        const botMoved = applyMove(botMove);
-        if (botMoved) {
+        const botMoveResult = applyMove(botMove);
+        if (botMoveResult) {
+          // Record analysis for bot move
+          setAnalysis(prev => [
+            ...prev,
+            {
+              moveNumber: Math.floor(moveList.length / 2) + 1,
+              move: botMoveResult.san,
+              player: orientation === "white" ? "black" : "white",
+              time: formatTime(orientation === "white" ? timeBlack : timeWhite),
+              depth: "...",
+              score: "...",
+              variation: ""
+            }
+          ]);
+
           const updatedHistory = [...newHistory, game.fen()];
           setMoveHistory(updatedHistory);
           setCurrentMoveIndex(updatedHistory.length - 1);
         }
         setIsUserTurn(true);
+        setStatus("Your turn");
+        setIsBotThinking(false);
       });
     }, 300);
 
@@ -202,6 +291,11 @@ const ChessGame = () => {
     setLastMoveSquares({});
     setMoveHistory([]);
     setCurrentMoveIndex(-1);
+    setAnalysis([]);
+    setTimeWhite(600);
+    setTimeBlack(600);
+    setStatus("Your turn");
+    setIsBotThinking(false);
   };
 
   const handleFlip = () => {
@@ -242,52 +336,147 @@ const ChessGame = () => {
     setLastMoveSquares({});
   };
 
+  // const changeBotLevel = (level) => {
+  //   setBotLevel(level);
+  //   setStatus(`Bot level set to ${getLevelName(level)}`);
+  //   setTimeout(() => setStatus("Your turn"), 2000);
+  // };
+
+  // const getLevelName = (level) => {
+  //   if (level <= 5) return 'Beginner';
+  //   if (level <= 10) return 'Intermediate';
+  //   if (level <= 15) return 'Advanced';
+  //   return 'Expert';
+  // };
+
   return (
-    // <div style={{ padding: 20 }}>
-    <div className="flex flex-row items-start gap-4 p-4">
-      <Chessboard
-        position={fen}
-        onPieceDrop={onDrop}
-        // boardWidth={600}
-        boardOrientation={orientation}
-        onSquareClick={onSquareClick}
-        customSquareStyles={{
-          ...lastMoveSquares,
-          ...getDotStyles(),
-        }}
-      />
-
-      {gameOver && <h2 style={{ color: "red", textAlign: "center" }}>Game Over</h2>}
-
-      <div style={{ marginTop: 10 }}>
-        <button className="btn" onClick={handleRestart}>♻️ Restart</button>
-        <button className="btn" onClick={handleFlip}>🔄 Flip</button>
-        <button className="btn" onClick={handlePrev}>⏮️ Prev</button>
-        <button className="btn" onClick={handleNext}>⏭️ Next</button>
-        <button className="btn" style={{ background: "linear-gradient(to right, #e67e22, #d35400)" }} onClick={handleDownloadPgn}>Download PGN</button>
+    <div className="app">
+      <div className="header">
+        <div className="game-info">
+          <h1>Queen's Pawn Opening: Mikénas Defense</h1>
+          <div className="game-time">{playerName} vs. {botName} ({gameTime} min)</div>
+        </div>
+        <div className="player-info">
+          <div className="player">
+            <div className="player-name">{playerName}</div>
+            <div className="player-time">{formatTime(timeWhite)}</div>
+          </div>
+          <div className="player">
+            <div className="player-name">{botName}</div>
+            <div className="player-time">{formatTime(timeBlack)}</div>
+          </div>
+        </div>
       </div>
 
-      <div className="w-64 pl-3 overflow-y-auto h-[480px] bg-white rounded shadow p-4">
-        <h3 className="text-lg font-semibold mb-3">Move Analysis</h3>
-        <table className="w-full text-sm table-auto border-collapse">
-          <thead>
-            <tr className="border-b border-gray-300 text-left">
-              <th className="py-1 px-2">Turn</th>
-              <th className="py-1 px-2 ">White</th>
-              <th className="py-1 px-2">Black</th>
-            </tr>
-          </thead>
-          <tbody>
-            {moveList.map((turn, index) => (
-              <tr key={index} className="border-b border-gray-200">
-                <td className="py-1 px-2 font-medium">{index + 1}.</td>
-                {/* <td className="py-1 px-2">{turn.number}</td> */}
-                <td className="py-1 px-2">{turn.white}</td>
-                <td className="py-1 px-2">{turn.black}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {/* Main Game Area */}
+      <div className="game-container">
+        <div className="board-section">
+          <div className="status-bar">
+            <div className={`status-indicator ${status.includes('Your turn') ? 'active' : ''}`}></div>
+            {status}
+            {isBotThinking && <div className="thinking-animation"></div>}
+          </div>
+
+          <div className="board-wrapper">
+            <Chessboard
+              position={fen}
+              onPieceDrop={onDrop}
+              boardOrientation={orientation}
+              onSquareClick={onSquareClick}
+              customSquareStyles={{
+                ...lastMoveSquares,
+                ...getDotStyles(),
+              }}
+              customBoardStyle={{
+                borderRadius: '8px',
+                boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)'
+              }}
+              customDarkSquareStyle={{ backgroundColor: '#779556' }}
+              customLightSquareStyle={{ backgroundColor: '#ebecd0' }}
+            />
+          </div>
+
+          <div className="controls">
+            <button onClick={handleRestart} className="control-btn new-game">
+              <i className="fas fa-sync-alt"></i> New Game
+            </button>
+            <button onClick={handleFlip} className="control-btn flip-board">
+              <i className="fas fa-undo"></i> Flip Board
+            </button>
+            <button onClick={handlePrev} className="control-btn new-game">
+              <i className="fas fa-sync-alt"></i> Prev
+            </button>
+            <button onClick={handleNext} className="control-btn flip-board">
+              <i className="fas fa-undo"></i> Next
+            </button>
+            <button onClick={handleDownloadPgn} className="control-btn download-pgn">
+              <i className="fas fa-download"></i> Download PGN
+            </button>
+          </div>
+        </div>
+
+        <div className="analysis-section">
+          <div className="analysis-header">
+            <h3 className="text-lg font-semibold mb-3">Move Analysis</h3>
+            <div className="analysis-filters">
+              <button className="filter-btn active">All</button>
+              <button className="filter-btn">White</button>
+              <button className="filter-btn">Black</button>
+            </div>
+            </div>
+            <div className="analysis-table">
+              <div className="table-header">
+                <div>Move</div>
+                <div>White</div>
+                <div>Black</div>
+                <div>Time</div>
+                <div>Depth</div>
+                {/* <div>Score</div>
+                <div>Variation</div> */}
+              </div>
+              <div className="table-body"> 
+                {moveList.map((turn, index) => (
+                  <div key={index} className={`analysis-row ${turn.player}`}>
+                    <div className="move-info">{index + 1}.</div>
+                    {/* <div>{turn.number}</div> */}
+                    <div style={{marginLeft: 12}}>{turn.white}</div>
+                    <div style={{marginLeft: 12}}>{turn.black}</div>
+
+                    {/* <div className="move-time">
+                      <i className="fas fa-clock"></i> {turn.time}
+                    </div> */}
+                  </div>
+                ))}
+              </div>
+
+              <div className="current-position">
+            <h3>Current Position Evaluation</h3>
+            <div className="evaluation-bar">
+              <div className="evaluation-fill" style={{ width: '45%' }}></div>
+              <div className="evaluation-text">+0.8</div>
+            </div>
+            <div className="position-stats">
+              <div className="stat">
+                <div className="stat-label">Material</div>
+                <div className="stat-value">+0.3</div>
+              </div>
+              <div className="stat">
+                <div className="stat-label">Mobility</div>
+                <div className="stat-value">+0.2</div>
+              </div>
+              <div className="stat">
+                <div className="stat-label">King Safety</div>
+                <div className="stat-value">+0.3</div>
+              </div>
+            </div>
+              </div>
+        </div>
+      </div>
+      </div>
+
+      {/* Footer */}
+      <div className="footer">
+        <p>Chat Disabled • Powered by Stockfish 16</p>
       </div>
     </div>
   );
@@ -302,6 +491,8 @@ self.onmessage = function(e) {
     self.postMessage("uciok");
   } else if (e.data.startsWith("position fen")) {
     currentFen = e.data.split("position fen ")[1];
+    self.postMessage("readyok");
+  } else if (e.data.startsWith("setoption")) {
     self.postMessage("readyok");
   } else if (e.data.startsWith("go")) {
     setTimeout(() => {
