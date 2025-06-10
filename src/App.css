@@ -505,3 +505,48 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+
+
+
+
+.container {
+  text-align: center;
+  padding: 30px;
+  font-family: sans-serif;
+}
+
+.controls {
+  margin-top: 20px;
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+button {
+  padding: 8px 16px;
+  font-size: 16px;
+  background: #1976d2;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.3s;
+}
+
+button:hover {
+  background: #1565c0;
+}
+
+.move-counter {
+  margin-top: 15px;
+  font-size: 18px;
+}
+
+
+.analysis-row.highlight {
+  background-color: #d1ffd1;
+  font-weight: bold;
+  color: #2c3e50;
+}

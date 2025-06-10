@@ -441,15 +441,11 @@ const ChessGame = () => {
                     {/* <div>{turn.number}</div> */}
                     <div style={{marginLeft: 12}}>{turn.white}</div>
                     <div style={{marginLeft: 12}}>{turn.black}</div>
-
-                    {/* <div className="move-time">
-                      <i className="fas fa-clock"></i> {turn.time}
-                    </div> */}
                   </div>
                 ))}
               </div>
 
-              <div className="current-position">
+            <div className="current-position">
             <h3>Current Position Evaluation</h3>
             <div className="evaluation-bar">
               <div className="evaluation-fill" style={{ width: '45%' }}></div>
@@ -469,14 +465,14 @@ const ChessGame = () => {
                 <div className="stat-value">+0.3</div>
               </div>
             </div>
-              </div>
+            </div>
         </div>
       </div>
       </div>
 
       {/* Footer */}
       <div className="footer">
-        <p>Chat Disabled • Powered by Stockfish 16</p>
+        <p>• Powered by UinSports</p>
       </div>
     </div>
   );

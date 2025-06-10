@@ -6,8 +6,8 @@ function App() {
   return (
     <div>
       <h2>Chess Game Viewer</h2>
-      <ChessGame/>
-      {/* <ChessPGNPlayer /> */}
+      {/* <ChessGame/> */}
+      <ChessPGNPlayer />
     </div>
   );
 }
